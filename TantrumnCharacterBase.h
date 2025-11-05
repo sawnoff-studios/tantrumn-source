@@ -65,6 +65,15 @@ public:
 	UFUNCTION(BlueprintPure)
 	bool IsStunned() const { return bIsStunned; }
 
+	UFUNCTION(BlueprintPure)
+	bool IsBeingRescued() const { return bIsBeingRescued; }
+
+	UFUNCTION(BlueprintPure)
+	bool IsHovering() const;
+
+	UFUNCTION(Server, Reliable)
+	void ServerPlayCelebrateMontage();
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -79,12 +88,18 @@ protected:
 
 	//RPC's actions that can need to be done on the server in order to replicate
 	UFUNCTION(Server, Reliable)
+	void ServerSprintStart();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSprintEnd();
+
+	UFUNCTION(Server, Reliable)
 	void ServerPullObject(AThrowableActor* InThrowableActor);
 
 	UFUNCTION(Server, Reliable)
 	void ServerRequestPullObject(bool bIsPulling);
 
-	UFUNCTION(Server, Reliable)
+	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerRequestThrowObject();
 
 	UFUNCTION(NetMulticast, Reliable)
@@ -100,7 +115,15 @@ protected:
 	void ServerFinishThrow();
 
 	bool PlayThrowMontage();
+	bool PlayCelebrateMontage();
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlayCelebrateMontage();
+
+	void UpdateThrowMontagePlayRate();
 	void UnbindMontage();
+
+	
 
 	UFUNCTION()
 	void OnMontageBlendingOut(UAnimMontage* Montage, bool bInterrupted);
@@ -115,11 +138,13 @@ protected:
 	void OnNotifyEndReceived(FName NotifyName, const FBranchingPointNotifyPayload& BranchingPointNotifyPayload);
 
 	void OnStunBegin(float StunRatio);
-	void UpdateStun();
+	void UpdateStun(float DeltaTime);
 	void OnStunEnd();
-
-	void UpdateRescue(float DeltaTime);
+	
+	//these only happen on the server
+	//the variable bIsBeingRescued is replicated
 	void StartRescue();
+	void UpdateRescue(float DeltaTime);
 	void EndRescue();
 
 	UPROPERTY(EditAnywhere, Category = "Movement")
@@ -142,14 +167,14 @@ protected:
 	USoundCue* HeavyLandSound = nullptr;
 
 	float StunTime = 0.0f;
-	float StunBeginTimestamp = 0.0f;
+	//float StunBeginTimestamp = 0.0f;
+	float CurrentStunTimer = 0.0f;
 
 	bool bIsStunned = false;
 	bool bIsSprinting = false;
 
 	float MaxWalkSpeed = 0.0f;
 
-	
 	UPROPERTY(VisibleAnywhere, ReplicatedUsing = OnRep_CharacterThrowState, Category = "Throw")
 	//UPROPERTY(VisibleAnywhere, replicated, Category = "Throw")
 	ECharacterThrowState CharacterThrowState = ECharacterThrowState::None;
@@ -163,16 +188,27 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	UAnimMontage* ThrowMontage = nullptr;
 
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	UAnimMontage* CelebrateMontage = nullptr;
+
 	FOnMontageBlendingOutStarted BlendingOutDelegate;
 	FOnMontageEnded MontageEndedDelegate;
 
 	//handle fall out of world
-	FVector LastGroundPosition = FVector::ZeroVector; //Last Position on World when OnGround
-	FVector FallOutOfWorldPosition = FVector::ZeroVector; //Position From Player when it Hits KillZ
-	float CurrentRescueTime = 0.0f; // Used to set a timer from Moving Player back to Ground
-	bool bIsPlayerBeingRescued = false;//Set to true in fell out of world
+	UPROPERTY(replicated)
+	FVector LastGroundPosition = FVector::ZeroVector; 
+
+	UPROPERTY(ReplicatedUsing = OnRep_IsBeingRescued)
+	bool bIsBeingRescued = false;
+	
+	UFUNCTION()
+	void OnRep_IsBeingRescued();
+
 	UPROPERTY(EditAnywhere, Category = "KillZ")
-	float TimeToRescuePlayer = 3.f;//Set time that takes to put Player back in Ground
+	float TimeToRescuePlayer = 3.f;
+
+	FVector FallOutOfWorldPosition = FVector::ZeroVector;
+	float CurrentRescueTime = 0.0f;
 
 private:
 
@@ -180,7 +216,7 @@ private:
 	AThrowableActor* ThrowableActor;
 
 	void ApplyEffect_Implementation(EEffectType EffectType, bool bIsBuff) override;
-
+	void UpdateEffect(float DeltaTime);
 	void EndEffect();
 
 	bool bIsUnderEffect = false;

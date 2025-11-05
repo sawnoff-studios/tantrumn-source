@@ -7,6 +7,9 @@
 #include "Kismet/GameplayStatics.h"
 #include "TantrumnCharacterBase.h"
 #include "TantrumnGameModeBase.h"
+#include "TantrumnGameInstance.h"
+#include "TantrumnGameStateBase.h"
+#include "TantrumnPlayerState.h"
 
 static TAutoConsoleVariable<bool> CVarDisplayLaunchInputDelta(
 	TEXT("Tantrum.Character.Debug.DisplayLaunchInputDelta"),
@@ -17,28 +20,94 @@ static TAutoConsoleVariable<bool> CVarDisplayLaunchInputDelta(
 void ATantrumnPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
-	//GameModeRef = Cast<ATantrumnGameModeBase>(GetWorld()->GetAuthGameMode());
-	
+	TantrumnGameState = GetWorld()->GetGameState<ATantrumnGameStateBase>();
+	//ensureMsgf(TantrumnGameState, TEXT("ATantrumnPlayerController::BeginPlay Invalid TantrumnGameState"));
+}
+//called from gamemode, so only on authority will we get these calls
+void ATantrumnPlayerController::OnPossess(APawn* aPawn)
+{
+	Super::OnPossess(aPawn);
+	UE_LOG(LogTemp, Warning, TEXT("OnPossess: %s"), *GetName());
+}
+
+void ATantrumnPlayerController::OnUnPossess()
+{
+	Super::OnUnPossess();
+	UE_LOG(LogTemp, Warning, TEXT("OnUnPossess: %s"), *GetName());
+}
+
+void ATantrumnPlayerController::ClientDisplayCountdown_Implementation(float GameCountdownDuration)
+{
+	if (UTantrumnGameInstance* TantrumnGameInstance = GetWorld()->GetGameInstance<UTantrumnGameInstance>())
+	{
+		TantrumnGameInstance->DisplayCountdown(GameCountdownDuration, this);
+	}
+}
+
+void ATantrumnPlayerController::ClientRestartGame_Implementation()
+{
+	if (ATantrumnPlayerState* TantrumnPlayerState = GetPlayerState<ATantrumnPlayerState>())
+	{
+		if (UTantrumnGameInstance* TantrumnGameInstance = GetWorld()->GetGameInstance<UTantrumnGameInstance>())
+		{
+			TantrumnGameInstance->RestartGame(this);
+		}
+	}
+}
+
+void ATantrumnPlayerController::ClientReachedEnd_Implementation()
+{
+	//this needs to be named better, it's just displaying the end screen
+	//this will be seperate, as it will come after the montage...
+	//client gets hud authority needs to replicate the montage
+
+	if (ATantrumnCharacterBase* TantrumnCharacterBase = Cast<ATantrumnCharacterBase>(GetCharacter()))
+	{
+		TantrumnCharacterBase->ServerPlayCelebrateMontage();
+		TantrumnCharacterBase->GetCharacterMovement()->DisableMovement();
+	}
+
+	if (UTantrumnGameInstance* TantrumnGameInstance = GetWorld()->GetGameInstance<UTantrumnGameInstance>())
+	{
+		//call the level complete event for the widget...
+	}
+
+	FInputModeUIOnly InputMode;
+	SetInputMode(InputMode);
+	SetShowMouseCursor(true);
+}
+
+void ATantrumnPlayerController::ServerRestartLevel_Implementation()
+{
+	//GetWorld()->ServerTravel(TEXT("?restart"));
+	ATantrumnGameModeBase* TantrumnGameMode = GetWorld()->GetAuthGameMode<ATantrumnGameModeBase>();
+	if (ensureMsgf(TantrumnGameMode, TEXT("ATantrumnPlayerController::ServerRestartLevel_Implementation Invalid GameMode")))
+	{
+		TantrumnGameMode->RestartGame();
+		
+	}
+	/*RestartPlayer()
+	GetWorld()->GetCurrentLevel()->GetName()
+	GetWorld()->ServerTravel(TEXT("?restart"));*/
 }
 
 void ATantrumnPlayerController::ReceivedPlayer()
 {
 	Super::ReceivedPlayer();
-	GameModeRef = GetWorld()->GetAuthGameMode<ATantrumnGameModeBase>();
-	if (ensureMsgf(GameModeRef, TEXT("ATantrumnPlayerController::ReceivedPlayer missing GameMode Reference")))
-	{
-		GameModeRef->ReceivePlayer(this);
-	}
 
-	if (HUDClass)
+	if (IsLocalController())
 	{
-		HUDWidget = CreateWidget(this, HUDClass);
-		if (HUDWidget)
+		if (HUDClass)
 		{
-			//HUDWidget->AddToViewport();
-			HUDWidget->AddToPlayerScreen();
+			HUDWidget = CreateWidget(this, HUDClass);
+			if (HUDWidget)
+			{
+				//HUDWidget->AddToViewport();
+				HUDWidget->AddToPlayerScreen();
+			}
 		}
 	}
+	
 }
 
 void ATantrumnPlayerController::SetupInputComponent()
@@ -66,12 +135,25 @@ void ATantrumnPlayerController::SetupInputComponent()
 	}
 }
 
+bool ATantrumnPlayerController::CanProcessRequest() const
+{
+	if (TantrumnGameState && TantrumnGameState->IsPlaying())
+	{
+		if (ATantrumnPlayerState* TantrumnPlayerState = GetPlayerState<ATantrumnPlayerState>())
+		{
+			return (TantrumnPlayerState->GetCurrentState() == EPlayerGameState::Playing);
+		}
+	}
+
+	return false;
+}
+
 void ATantrumnPlayerController::RequestMoveForward(float AxisValue)
 {
-	/*if(!GameModeRef || GameModeRef->GetCurrentGameState() != EGameState::Playing) 
+	if (!CanProcessRequest())
 	{
 		return;
-	}*/
+	}
 
 	if (AxisValue != 0.f)
 	{
@@ -83,10 +165,10 @@ void ATantrumnPlayerController::RequestMoveForward(float AxisValue)
 
 void ATantrumnPlayerController::RequestMoveRight(float AxisValue)
 {
-	/*if(!GameModeRef || GameModeRef->GetCurrentGameState() != EGameState::Playing) 
+	if (!CanProcessRequest())
 	{
 		return;
-	}*/
+	}
 
 	if (AxisValue != 0.f)
 	{
@@ -108,6 +190,11 @@ void ATantrumnPlayerController::RequestLookRight(float AxisValue)
 
 void ATantrumnPlayerController::RequestThrowObject(float AxisValue)
 {
+	if (!CanProcessRequest())
+	{
+		return;
+	}
+
 	if (ATantrumnCharacterBase* TantrumnCharacterBase = Cast<ATantrumnCharacterBase>(GetCharacter()))
 	{
 		if (TantrumnCharacterBase->CanThrowObject())
@@ -145,6 +232,11 @@ void ATantrumnPlayerController::RequestThrowObject(float AxisValue)
 
 void ATantrumnPlayerController::RequestPullObject()
 {
+	if (!CanProcessRequest())
+	{
+		return;
+	}
+	
 	if (ATantrumnCharacterBase* TantrumnCharacterBase = Cast<ATantrumnCharacterBase>(GetCharacter()))
 	{
 		TantrumnCharacterBase->RequestPullObject();
@@ -161,19 +253,19 @@ void ATantrumnPlayerController::RequestStopPullObject()
 
 void ATantrumnPlayerController::RequestJump()
 {
-	//create a function for this
-	//if(!GameModeRef || GameModeRef->GetCurrentGameState() != EGameState::Playing) 
-	//{
-	//	return;
-	//}
-	if (GetCharacter())
+	if (!CanProcessRequest())
 	{
-		GetCharacter()->Jump();
+		return;
+	}
+
+	if (ATantrumnCharacterBase* TantrumnCharacterBase = Cast<ATantrumnCharacterBase>(GetCharacter()))
+	{
+		TantrumnCharacterBase->Jump();
 
 		//SoundCue Triggers
-		if (JumpSound && GetCharacter()->GetCharacterMovement()->IsMovingOnGround())
+		if (JumpSound && TantrumnCharacterBase->GetCharacterMovement()->IsMovingOnGround())
 		{
-			FVector CharacterLocation = GetCharacter()->GetActorLocation();
+			FVector CharacterLocation = TantrumnCharacterBase->GetActorLocation();
 			UGameplayStatics::PlaySoundAtLocation(this, JumpSound, CharacterLocation);
 		}
 	}
@@ -181,41 +273,44 @@ void ATantrumnPlayerController::RequestJump()
 
 void ATantrumnPlayerController::RequestStopJump()
 {
-	if(GetCharacter())
+	if (ATantrumnCharacterBase* TantrumnCharacterBase = Cast<ATantrumnCharacterBase>(GetCharacter()))
 	{
-		GetCharacter()->StopJumping();
+		TantrumnCharacterBase->StopJumping();
 	}
 }
 
 void ATantrumnPlayerController::RequestCrouchStart()
 {
-	/*if(!GameModeRef || GameModeRef->GetCurrentGameState() != EGameState::Playing) 
+	if (!CanProcessRequest())
 	{
 		return;
-	}*/
-
-	if(!GetCharacter()->GetCharacterMovement()->IsMovingOnGround()) {return;}
-	if(GetCharacter())
-	{
-		GetCharacter()->Crouch();
 	}
+
+	ATantrumnCharacterBase* TantrumnCharacterBase = Cast<ATantrumnCharacterBase>(GetCharacter());
+	if(!TantrumnCharacterBase || !TantrumnCharacterBase->GetCharacterMovement()->IsMovingOnGround()) 
+	{
+		return;
+	}
+
+	TantrumnCharacterBase->Crouch();
 }
 
 void ATantrumnPlayerController::RequestCrouchEnd()
 {
-	if(GetCharacter())
+	if (ATantrumnCharacterBase* TantrumnCharacterBase = Cast<ATantrumnCharacterBase>(GetCharacter()))
 	{
-		GetCharacter()->UnCrouch();
+		TantrumnCharacterBase->UnCrouch();
 	}
 }
 
 void ATantrumnPlayerController::RequestSprintStart()
 {
-	//if(!GameModeRef || GameModeRef->GetCurrentGameState() != EGameState::Playing) 
-	//{
-	//	return;
-	//}
-	if(ATantrumnCharacterBase* TantrumnCharacterBase = Cast<ATantrumnCharacterBase>(GetCharacter()))
+	if (!CanProcessRequest())
+	{
+		return;
+	}
+
+	if (ATantrumnCharacterBase* TantrumnCharacterBase = Cast<ATantrumnCharacterBase>(GetCharacter()))
 	{
 		TantrumnCharacterBase->RequestSprintStart();
 	}

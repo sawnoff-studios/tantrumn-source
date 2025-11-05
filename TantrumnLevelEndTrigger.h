@@ -26,7 +26,5 @@ private:
 	// Custom Overlap function to override the Actor BeginOverlap version. 
 	UFUNCTION()
 	void OnOverlapBegin(class AActor* OverlappedActor, class AActor* OtherActor);
-
-	ATantrumnGameModeBase* GameModeRef;
 	
 };

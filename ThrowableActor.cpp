@@ -24,32 +24,33 @@ AThrowableActor::AThrowableActor()
 void AThrowableActor::BeginPlay()
 {
 	Super::BeginPlay();
-	ProjectileMovementComponent->OnProjectileStop.AddDynamic(this, &AThrowableActor::ProjectileStop);
+	if (HasAuthority())
+	{
+		ProjectileMovementComponent->OnProjectileStop.AddDynamic(this, &AThrowableActor::ProjectileStop);
+	}
+	
 }
 
 void AThrowableActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	ProjectileMovementComponent->OnProjectileStop.RemoveDynamic(this, &AThrowableActor::ProjectileStop);
+	if (HasAuthority())
+	{
+		ProjectileMovementComponent->OnProjectileStop.RemoveDynamic(this, &AThrowableActor::ProjectileStop);
+	}
 	Super::EndPlay(EndPlayReason);
 }
 
 void AThrowableActor::NotifyHit(UPrimitiveComponent* MyComp, AActor* Other, UPrimitiveComponent* OtherComp, bool bSelfMoved, FVector HitLocation, FVector HitNormal, FVector NormalImpulse, const FHitResult& Hit)
 {
 	Super::NotifyHit(MyComp, Other, OtherComp, bSelfMoved, HitLocation, HitNormal, NormalImpulse, Hit);
+
+	//potentially early out if not authoritive
+
 	if (State == EState::Idle || State == EState::Attached || State == EState::Dropped)
 	{
 		return;
 	}
 	
-	//three options when hit
-	//if in attached ignore
-
-	//if not we actor was being pulled or launched
-	//pulled we want to check that the hit is of the actor pulling
-	//in which case it's a successful attach
-	
-	//if launched and hit a character that is not the launcher
-	//do damage or whatever it is we want
 	if(State == EState::Launch)
 	{
 		IInteractInterface* I = Cast<IInteractInterface>(Other);
@@ -59,11 +60,6 @@ void AThrowableActor::NotifyHit(UPrimitiveComponent* MyComp, AActor* Other, UPri
 		}
 	}
 	
-	//ignore all other hits
-
-	//this will wait until the projectile comes to a natural stop before returning it to idle
-	
-
 	if (PullActor && State == EState::Pull )
 	{
 		if (ATantrumnCharacterBase* TantrumnCharacter = Cast<ATantrumnCharacterBase>(PullActor))
@@ -89,6 +85,7 @@ void AThrowableActor::NotifyHit(UPrimitiveComponent* MyComp, AActor* Other, UPri
 	PullActor = nullptr;
 }
 
+//only called on authority
 void AThrowableActor::ProjectileStop(const FHitResult& ImpactResult)
 {
 	if (State == EState::Launch || State == EState::Dropped)
@@ -96,12 +93,6 @@ void AThrowableActor::ProjectileStop(const FHitResult& ImpactResult)
 		State = EState::Idle;
 	}
 }
-
-// Called every frame
-//void AThrowableActor::Tick(float DeltaTime)
-//{
-//	Super::Tick(DeltaTime);
-//}
 
 bool AThrowableActor::Pull(AActor* InActor)
 {

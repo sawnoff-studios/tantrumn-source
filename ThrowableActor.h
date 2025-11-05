@@ -20,9 +20,6 @@ public:
 	// Sets default values for this actor's properties
 	AThrowableActor();
 
-	// Called every frame
-	//virtual void Tick(float DeltaTime) override;
-
 	UFUNCTION(BlueprintCallable)
 	bool IsIdle() const { return State == EState::Idle; }
 	
